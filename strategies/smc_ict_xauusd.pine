@@ -1,0 +1,484 @@
+// ============================================================
+// SMC ICT — XAUUSD Precision Bot  |  Pine Script v5
+// Strategy: Multi-TF alignment + Liquidity Sweeps + FVG Entry
+// Timeframes: 4H (trend) → 1H (refinement) → 15M (structure) → 5M/2M (execution)
+// Author: AI Trading Companion
+// ============================================================
+//@version=5
+strategy(
+    title            = "SMC ICT — XAUUSD Precision Bot",
+    shorttitle       = "SMC-ICT XAUUSD",
+    overlay          = true,
+    pyramiding       = 0,
+    default_qty_type = strategy.percent_of_equity,
+    default_qty_value= 100,
+    initial_capital  = 10000,
+    currency         = currency.USD,
+    calc_on_every_tick = false
+)
+
+// ============================================================
+// SECTION 1: INPUTS & SETTINGS
+// ============================================================
+
+// ── Timeframes ──────────────────────────────────────────────
+htf_tf  = input.timeframe("240", "HTF — 4H (Macro Trend)",      group="Section 1: System Architecture")
+itf_tf  = input.timeframe("60",  "ITF — 1H (POI Refinement)",   group="Section 1: System Architecture")
+stf_tf  = input.timeframe("15",  "STF — 15M (Structure Shift)", group="Section 1: System Architecture")
+
+// ── Structure detection ─────────────────────────────────────
+swing_left   = input.int(5,   "Swing Lookback Left",              minval=2, maxval=20,  group="Section 3: Structure Definitions")
+swing_right  = input.int(5,   "Swing Lookback Right",             minval=2, maxval=20,  group="Section 3: Structure Definitions")
+fvg_min_pips = input.float(2.0,"Min FVG Size (pips)",             minval=0.5, step=0.5, group="Section 3: Structure Definitions")
+eq_tol_pips  = input.float(5.0,"Equal High/Low Tolerance (pips)", minval=1.0, step=1.0, group="Section 3: Structure Definitions")
+sweep_window = input.int(20,  "Sweep Valid Window (bars)",        minval=5,  maxval=50,  group="Section 3: Structure Definitions")
+
+// ── Risk & Execution ────────────────────────────────────────
+risk_pct     = input.float(1.0, "Risk per Trade (% equity)",  minval=0.1, maxval=5.0,  step=0.1, group="Section 6: Risk Management")
+min_rr       = input.float(3.0, "Minimum R:R Ratio",          minval=1.0, maxval=10.0, step=0.5, group="Section 6: Risk Management")
+sl_buffer    = input.float(2.0, "SL Buffer beyond sweep (pips)", minval=0.0, step=0.5,            group="Section 6: Risk Management")
+max_spread   = input.float(4.0, "Max Allowed Spread (pips)",  minval=1.0, step=0.5,               group="Section 6: Risk Management")
+
+// ── News blackout ───────────────────────────────────────────
+use_news     = input.bool(true, "Enable High-Impact News Filter",  group="Section 6: Risk Management")
+
+// ── Visualization ───────────────────────────────────────────
+show_fvg     = input.bool(true,  "Show FVG zones",          group="Visualization")
+show_ob      = input.bool(true,  "Show Order Blocks",        group="Visualization")
+show_swing   = input.bool(true,  "Show Swing H/L markers",  group="Visualization")
+show_liq     = input.bool(true,  "Show Liquidity sweeps",   group="Visualization")
+show_htf     = input.bool(true,  "Show HTF Demand/Supply",  group="Visualization")
+
+c_bull = input.color(color.new(#26a69a, 80), "Bullish Color", group="Visualization")
+c_bear = input.color(color.new(#ef5350, 80), "Bearish Color", group="Visualization")
+
+// ============================================================
+// SECTION 2: MULTI-TIMEFRAME DATA
+// ============================================================
+
+// pip value for XAUUSD (1 pip = $0.10 = 0.1 price units, mintick = 0.01)
+pip = syminfo.mintick * 10
+
+// Request HTF 4H bars — lookahead_off prevents repainting
+[htf_o, htf_h, htf_l, htf_c] = request.security(
+    syminfo.tickerid, htf_tf, [open, high, low, close],
+    gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+
+// Request 1H bars
+[h1_o, h1_h, h1_l, h1_c] = request.security(
+    syminfo.tickerid, itf_tf, [open, high, low, close],
+    gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+
+// Request 15M bars
+[m15_o, m15_h, m15_l, m15_c] = request.security(
+    syminfo.tickerid, stf_tf, [open, high, low, close],
+    gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+
+// Spread check (spread data available on some brokers)
+raw_spread   = not na(ask) and not na(bid) ? (ask - bid) / pip : 0.0
+spread_ok    = raw_spread <= max_spread or raw_spread == 0.0
+
+// ============================================================
+// SECTION 3: STRUCTURAL DEFINITIONS
+// ============================================================
+
+// ── 3.1 Swing Highs / Lows (chart/LTF timeframe) ───────────
+ph = ta.pivothigh(high, swing_left, swing_right)
+pl = ta.pivotlow (low,  swing_left, swing_right)
+
+var float last_sh      = na   // last confirmed swing high price
+var float last_sl_     = na   // last confirmed swing low price
+var int   last_sh_bar  = na
+var int   last_sl_bar  = na
+
+if not na(ph)
+    last_sh     := ph
+    last_sh_bar := bar_index - swing_right
+if not na(pl)
+    last_sl_    := pl
+    last_sl_bar := bar_index - swing_right
+
+if show_swing
+    plotshape(not na(ph), style=shape.triangledown,
+        location=location.abovebar, color=color.new(#ef5350, 20),
+        size=size.tiny, offset=-swing_right, title="Swing High")
+    plotshape(not na(pl), style=shape.triangleup,
+        location=location.belowbar, color=color.new(#26a69a, 20),
+        size=size.tiny, offset=-swing_right, title="Swing Low")
+
+// ── 3.2 Fair Value Gap (FVG) ────────────────────────────────
+// Bullish FVG: Candle[2].High < Candle[0].Low  (gap below price)
+// Bearish FVG: Candle[2].Low  > Candle[0].High (gap above price)
+// Consequent Encroachment (CE) = exact 50% midpoint of the gap
+
+bull_fvg_raw = high[2] < low[0]  and (low[0]  - high[2]) > fvg_min_pips * pip
+bear_fvg_raw = low[2]  > high[0] and (low[2]  - high[0]) > fvg_min_pips * pip
+
+bull_fvg_ce_price  = bull_fvg_raw ? (high[2]  + low[0])  / 2 : na
+bull_fvg_top_price = bull_fvg_raw ? low[0]  : na
+bull_fvg_bot_price = bull_fvg_raw ? high[2] : na
+
+bear_fvg_ce_price  = bear_fvg_raw ? (low[2]   + high[0]) / 2 : na
+bear_fvg_top_price = bear_fvg_raw ? low[2]  : na
+bear_fvg_bot_price = bear_fvg_raw ? high[0] : na
+
+// Store last valid FVG for entry
+var float last_bull_ce  = na
+var float last_bull_top = na
+var float last_bull_bot = na
+var int   last_bull_bar = na
+
+var float last_bear_ce  = na
+var float last_bear_top = na
+var float last_bear_bot = na
+var int   last_bear_bar = na
+
+if bull_fvg_raw
+    last_bull_ce  := bull_fvg_ce_price
+    last_bull_top := bull_fvg_top_price
+    last_bull_bot := bull_fvg_bot_price
+    last_bull_bar := bar_index
+
+if bear_fvg_raw
+    last_bear_ce  := bear_fvg_ce_price
+    last_bear_top := bear_fvg_top_price
+    last_bear_bot := bear_fvg_bot_price
+    last_bear_bar := bar_index
+
+// FVG background highlight
+bgcolor(show_fvg and bull_fvg_raw ? color.new(#26a69a, 88) : na, title="Bullish FVG")
+bgcolor(show_fvg and bear_fvg_raw ? color.new(#ef5350, 88) : na, title="Bearish FVG")
+
+// FVG CE line
+plot(show_fvg and not na(last_bull_ce) ? last_bull_ce : na,
+    color=color.new(#26a69a, 40), linewidth=1, style=plot.style_linebr,
+    title="Bull FVG CE")
+plot(show_fvg and not na(last_bear_ce) ? last_bear_ce : na,
+    color=color.new(#ef5350, 40), linewidth=1, style=plot.style_linebr,
+    title="Bear FVG CE")
+
+// ── 3.3 Order Block (OB) ────────────────────────────────────
+// Bullish OB: last consecutive bearish candle BEFORE a structural break upward
+// Bearish OB: last consecutive bullish candle BEFORE a structural break downward
+
+bull_break = not na(last_sh) and close > last_sh and close[1] <= last_sh
+bear_break = not na(last_sl_) and close < last_sl_ and close[1] >= last_sl_
+
+var float bull_ob_h = na
+var float bull_ob_l = na
+var float bear_ob_h = na
+var float bear_ob_l = na
+
+if bull_break
+    // Walk back up to 10 bars to find the most recent bearish candle
+    for i = 1 to 10
+        if close[i] < open[i]
+            bull_ob_h := high[i]
+            bull_ob_l := low[i]
+            break
+
+if bear_break
+    for i = 1 to 10
+        if close[i] > open[i]
+            bear_ob_h := high[i]
+            bear_ob_l := low[i]
+            break
+
+if show_ob
+    plotshape(bull_break, style=shape.square, location=location.belowbar,
+        color=color.new(#26a69a, 0), size=size.tiny, title="Bull OB")
+    plotshape(bear_break, style=shape.square, location=location.abovebar,
+        color=color.new(#ef5350, 0), size=size.tiny, title="Bear OB")
+
+// ── 3.4 Market Structure Shift (MSS) ────────────────────────
+// Bullish MSS: candle body closes above the most recent swing high (displacement)
+// Bearish MSS: candle body closes below the most recent swing low
+
+bull_mss = not na(last_sh)  and close > last_sh  and close[1] <= last_sh
+bear_mss = not na(last_sl_) and close < last_sl_ and close[1] >= last_sl_
+
+var bool bull_mss_flag = false
+var bool bear_mss_flag = false
+var int  bull_mss_bar  = na
+var int  bear_mss_bar  = na
+
+if bull_mss
+    bull_mss_flag := true
+    bear_mss_flag := false
+    bull_mss_bar  := bar_index
+if bear_mss
+    bear_mss_flag := true
+    bull_mss_flag := false
+    bear_mss_bar  := bar_index
+
+plotshape(bull_mss, style=shape.labelup, location=location.belowbar,
+    color=#26a69a, text="MSS▲", textcolor=color.white,
+    size=size.small, title="Bullish MSS")
+plotshape(bear_mss, style=shape.labeldown, location=location.abovebar,
+    color=#ef5350, text="MSS▼", textcolor=color.white,
+    size=size.small, title="Bearish MSS")
+
+// ── 3.5 Liquidity Pools — SSL & BSL ─────────────────────────
+// SSL (Sell-Side Liquidity) = below swing lows / equal lows
+// BSL (Buy-Side Liquidity)  = above swing highs / equal highs
+
+// Equal Highs / Lows within pip tolerance
+eq_high = not na(ph) and not na(last_sh) and
+    math.abs(ph - last_sh) <= eq_tol_pips * pip and bar_index != last_sh_bar
+eq_low  = not na(pl) and not na(last_sl_) and
+    math.abs(pl - last_sl_) <= eq_tol_pips * pip and bar_index != last_sl_bar
+
+// Liquidity Sweep:
+// SSL sweep = price dips below swing low THEN closes back above it (stop hunt)
+// BSL sweep = price spikes above swing high THEN closes back below it
+ssl_sweep = not na(last_sl_) and low < last_sl_ and close > last_sl_
+bsl_sweep = not na(last_sh)  and high > last_sh  and close < last_sh
+
+var bool ssl_sweep_flag = false
+var bool bsl_sweep_flag = false
+var int  ssl_sweep_bar  = na
+var int  bsl_sweep_bar  = na
+var float ssl_sweep_low = na   // the swept swing low
+var float bsl_sweep_hi  = na   // the swept swing high
+
+if ssl_sweep
+    ssl_sweep_flag := true
+    ssl_sweep_bar  := bar_index
+    ssl_sweep_low  := last_sl_
+if bsl_sweep
+    bsl_sweep_flag := true
+    bsl_sweep_bar  := bar_index
+    bsl_sweep_hi   := last_sh
+
+if show_liq
+    plotshape(ssl_sweep, style=shape.xcross, location=location.belowbar,
+        color=#ffeb3b, size=size.small, title="SSL Sweep")
+    plotshape(bsl_sweep, style=shape.xcross, location=location.abovebar,
+        color=#ffeb3b, size=size.small, title="BSL Sweep")
+    plotshape(eq_high, style=shape.circle, location=location.abovebar,
+        color=color.new(#ef5350, 40), size=size.tiny, title="Equal Highs")
+    plotshape(eq_low, style=shape.circle, location=location.belowbar,
+        color=color.new(#26a69a, 40), size=size.tiny, title="Equal Lows")
+
+// ── 3.6 HTF Demand & Supply Zones (4H pivot areas) ──────────
+htf_ph = ta.pivothigh(htf_h, 3, 3)
+htf_pl = ta.pivotlow (htf_l, 3, 3)
+
+var float htf_dz_hi = na   // HTF Demand Zone top
+var float htf_dz_lo = na   // HTF Demand Zone bottom
+var float htf_sz_hi = na   // HTF Supply Zone top
+var float htf_sz_lo = na   // HTF Supply Zone bottom
+
+if not na(htf_pl)
+    // Demand zone: area around HTF swing low
+    htf_dz_hi := htf_c       // close of the 4H candle at swing low (OB)
+    htf_dz_lo := htf_l       // actual swing low
+
+if not na(htf_ph)
+    // Supply zone: area around HTF swing high
+    htf_sz_hi := htf_h
+    htf_sz_lo := htf_c
+
+in_htf_demand = not na(htf_dz_hi) and not na(htf_dz_lo) and
+    close >= htf_dz_lo and close <= htf_dz_hi * 1.002   // small tolerance
+
+in_htf_supply = not na(htf_sz_hi) and not na(htf_sz_lo) and
+    close >= htf_sz_lo * 0.998 and close <= htf_sz_hi
+
+if show_htf
+    bgcolor(in_htf_demand ? color.new(#26a69a, 92) : na, title="In HTF Demand")
+    bgcolor(in_htf_supply ? color.new(#ef5350, 92) : na, title="In HTF Supply")
+
+// ============================================================
+// SECTION 4: TRADING MODEL 1 — BULLISH REVERSAL (BUY)
+// ============================================================
+// Chronological sequence:
+// [1] Price enters 4H Demand Zone (HTF setup)
+// [2] 1H confirms price in refined demand area
+// [3] SSL sweep on LTF (stop hunt below swing low)
+// [4] Bullish MSS on LTF after the sweep (close above prior swing high)
+// [5] Fresh bullish FVG forms AFTER the MSS (displacement gap)
+// [6] Entry: Limit Buy at FVG Open or CE (50% midpoint)
+// [Invalidation]: HTF Demand Zone invalidated before LTF MSS
+
+ssl_recent   = ssl_sweep_flag and not na(ssl_sweep_bar) and (bar_index - ssl_sweep_bar) <= sweep_window
+bull_mss_recent = bull_mss_flag and not na(bull_mss_bar) and (bar_index - bull_mss_bar) <= sweep_window
+bull_fvg_after_mss = not na(last_bull_ce) and not na(last_bull_bar) and
+    not na(bull_mss_bar) and last_bull_bar > bull_mss_bar   // FVG formed AFTER MSS
+
+// Full bullish entry condition
+bull_entry_condition = in_htf_demand     and   // [1] HTF Demand Zone active
+    ssl_recent          and                    // [3] SSL sweep within window
+    bull_mss_recent     and                    // [4] Bullish MSS confirmed
+    bull_fvg_after_mss  and                    // [5] FVG formed post-MSS
+    spread_ok           and                    // Spread filter
+    strategy.position_size == 0               // No open position
+
+// ============================================================
+// SECTION 5: TRADING MODEL 2 — BEARISH CONTINUATION (SELL)
+// ============================================================
+// Chronological sequence:
+// [1] 4H/1H bearish order block or FVG overhead (HTF supply)
+// [2] Price pulls back into HTF Supply Zone
+// [3] BSL sweep on LTF (short-term swing high taken out)
+// [4] Bearish MSS on LTF (close below prior swing low)
+// [5] Fresh bearish FVG forms below the institutional sweeping candle
+// [6] Entry: Limit Sell at premium — FVG CE or OB open
+
+bsl_recent   = bsl_sweep_flag and not na(bsl_sweep_bar) and (bar_index - bsl_sweep_bar) <= sweep_window
+bear_mss_recent = bear_mss_flag and not na(bear_mss_bar) and (bar_index - bear_mss_bar) <= sweep_window
+bear_fvg_after_mss = not na(last_bear_ce) and not na(last_bear_bar) and
+    not na(bear_mss_bar) and last_bear_bar > bear_mss_bar
+
+bear_entry_condition = in_htf_supply     and   // [1] HTF Supply Zone active
+    bsl_recent          and                    // [3] BSL sweep within window
+    bear_mss_recent     and                    // [4] Bearish MSS confirmed
+    bear_fvg_after_mss  and                    // [5] FVG formed post-MSS
+    spread_ok           and                    // Spread filter
+    strategy.position_size == 0               // No open position
+
+// ============================================================
+// SECTION 6: RISK & POSITION MANAGEMENT
+// ============================================================
+
+// ── News blackout filter ─────────────────────────────────────
+// Blocks trading during high-impact windows (UTC times):
+// NFP / CPI: Fridays + economic release days 13:15–14:00 UTC
+// FOMC:      18:00–19:00 UTC on meeting days (Wednesday)
+// This is a time-of-day approximation — use an economic calendar for precision
+is_news_time = use_news and (
+    (dayofweek == dayofweek.friday and hour == 13 and minute >= 15) or
+    (dayofweek == dayofweek.friday and hour == 14 and minute <= 30) or
+    (hour == 13 and minute >= 15 and hour < 14) or
+    (dayofweek == dayofweek.wednesday and hour >= 18 and hour < 20)
+)
+
+// ── Dynamic lot sizing ────────────────────────────────────────
+// Position size in oz: risk_amount / (SL_distance_in_pips * $0.10_per_pip_per_oz)
+f_calc_qty(entry_p, stop_p) =>
+    sl_dist_price  = math.abs(entry_p - stop_p)
+    sl_dist_pips   = sl_dist_price / pip
+    risk_usd       = strategy.equity * (risk_pct / 100)
+    pip_value_usd  = 0.10                          // $0.10 per pip per 1 oz XAUUSD
+    raw_qty        = risk_usd / (sl_dist_pips * pip_value_usd)
+    math.max(math.round(raw_qty, 2), 0.01)
+
+// ── Execute BUY ───────────────────────────────────────────────
+if bull_entry_condition and not is_news_time
+    entry_price = last_bull_ce                         // Limit at FVG CE
+    stop_price  = ssl_sweep_low - sl_buffer * pip     // SL: below swept low
+    sl_dist     = math.abs(entry_price - stop_price)
+    tp_price    = entry_price + sl_dist * min_rr       // TP: 1:3 minimum
+    qty         = f_calc_qty(entry_price, stop_price)
+
+    strategy.entry("BUY", strategy.long, qty=qty,
+        limit=entry_price, comment="BUY | FVG CE " + str.tostring(entry_price, "#.##"))
+    strategy.exit("BUY Exit", from_entry="BUY",
+        stop=stop_price, limit=tp_price,
+        comment="SL/TP")
+
+    // Reset sweep + MSS flags after entry
+    ssl_sweep_flag := false
+    bull_mss_flag  := false
+
+// ── Execute SELL ──────────────────────────────────────────────
+if bear_entry_condition and not is_news_time
+    entry_price = last_bear_ce                         // Limit at FVG CE
+    stop_price  = bsl_sweep_hi + sl_buffer * pip      // SL: above swept high
+    sl_dist     = math.abs(stop_price - entry_price)
+    tp_price    = entry_price - sl_dist * min_rr       // TP: 1:3 minimum
+    qty         = f_calc_qty(entry_price, stop_price)
+
+    strategy.entry("SELL", strategy.short, qty=qty,
+        limit=entry_price, comment="SELL | FVG CE " + str.tostring(entry_price, "#.##"))
+    strategy.exit("SELL Exit", from_entry="SELL",
+        stop=stop_price, limit=tp_price,
+        comment="SL/TP")
+
+    bsl_sweep_flag := false
+    bear_mss_flag  := false
+
+// ── Close on news ─────────────────────────────────────────────
+if is_news_time and strategy.position_size != 0
+    strategy.close_all(comment="News Filter — closed")
+
+// ── High spread warning background ───────────────────────────
+bgcolor(not spread_ok and raw_spread > 0 ? color.new(#ff9800, 88) : na, title="High Spread")
+bgcolor(is_news_time ? color.new(#9c27b0, 90) : na, title="News Blackout")
+
+// ============================================================
+// SECTION 7: VISUALIZATION & ALERTS
+// ============================================================
+
+// Buy / Sell signal markers
+plotshape(bull_entry_condition and not is_news_time,
+    style=shape.triangleup, location=location.belowbar,
+    color=#26a69a, size=size.normal, title="BUY Signal",
+    text="BUY", textcolor=color.white)
+plotshape(bear_entry_condition and not is_news_time,
+    style=shape.triangledown, location=location.abovebar,
+    color=#ef5350, size=size.normal, title="SELL Signal",
+    text="SELL", textcolor=color.white)
+
+// ── Dashboard table ───────────────────────────────────────────
+var table dash = table.new(position.top_right, 2, 10,
+    bgcolor=color.new(#0d1117, 65),
+    border_width=1, border_color=color.new(#30363d, 0))
+
+if barstate.islast
+    pos_txt = strategy.position_size > 0 ? "LONG" : strategy.position_size < 0 ? "SHORT" : "FLAT"
+    pos_col = strategy.position_size > 0 ? #26a69a : strategy.position_size < 0 ? #ef5350 : #9e9e9e
+
+    table.cell(dash, 0, 0, "SMC ICT XAUUSD",   text_color=#58a6ff,  text_size=size.small, bgcolor=color.new(#161b22,0))
+    table.cell(dash, 1, 0, "v1.0",              text_color=#8b949e,  text_size=size.small, bgcolor=color.new(#161b22,0))
+    table.cell(dash, 0, 1, "Position",          text_color=#8b949e,  text_size=size.small)
+    table.cell(dash, 1, 1, pos_txt,             text_color=color.new(pos_col,0), text_size=size.small)
+    table.cell(dash, 0, 2, "HTF Zone",          text_color=#8b949e,  text_size=size.small)
+    table.cell(dash, 1, 2, in_htf_demand ? "DEMAND" : in_htf_supply ? "SUPPLY" : "NONE",
+        text_color=in_htf_demand ? #26a69a : in_htf_supply ? #ef5350 : #8b949e, text_size=size.small)
+    table.cell(dash, 0, 3, "SSL Sweep",         text_color=#8b949e,  text_size=size.small)
+    table.cell(dash, 1, 3, ssl_recent ? "✓ ACTIVE" : "—",
+        text_color=ssl_recent ? #26a69a : #8b949e, text_size=size.small)
+    table.cell(dash, 0, 4, "BSL Sweep",         text_color=#8b949e,  text_size=size.small)
+    table.cell(dash, 1, 4, bsl_recent ? "✓ ACTIVE" : "—",
+        text_color=bsl_recent ? #ef5350 : #8b949e, text_size=size.small)
+    table.cell(dash, 0, 5, "Bull MSS",          text_color=#8b949e,  text_size=size.small)
+    table.cell(dash, 1, 5, bull_mss_recent ? "✓ YES" : "—",
+        text_color=bull_mss_recent ? #26a69a : #8b949e, text_size=size.small)
+    table.cell(dash, 0, 6, "Bear MSS",          text_color=#8b949e,  text_size=size.small)
+    table.cell(dash, 1, 6, bear_mss_recent ? "✓ YES" : "—",
+        text_color=bear_mss_recent ? #ef5350 : #8b949e, text_size=size.small)
+    table.cell(dash, 0, 7, "Bull FVG CE",       text_color=#8b949e,  text_size=size.small)
+    table.cell(dash, 1, 7, not na(last_bull_ce) ? str.tostring(last_bull_ce,"#.##") : "—",
+        text_color=#26a69a, text_size=size.small)
+    table.cell(dash, 0, 8, "Bear FVG CE",       text_color=#8b949e,  text_size=size.small)
+    table.cell(dash, 1, 8, not na(last_bear_ce) ? str.tostring(last_bear_ce,"#.##") : "—",
+        text_color=#ef5350, text_size=size.small)
+    table.cell(dash, 0, 9, "Spread",            text_color=#8b949e,  text_size=size.small)
+    table.cell(dash, 1, 9, str.tostring(raw_spread,"#.#") + " pips",
+        text_color=spread_ok ? #26a69a : #ef5350, text_size=size.small)
+
+// ── Alert conditions ──────────────────────────────────────────
+alertcondition(bull_entry_condition and not is_news_time,
+    title   = "SMC BUY Signal — XAUUSD",
+    message = "SMC ICT BUY XAUUSD | HTF Demand + SSL Sweep + Bull MSS + FVG CE @ {{close}} | SL below swept low")
+
+alertcondition(bear_entry_condition and not is_news_time,
+    title   = "SMC SELL Signal — XAUUSD",
+    message = "SMC ICT SELL XAUUSD | HTF Supply + BSL Sweep + Bear MSS + FVG CE @ {{close}} | SL above swept high")
+
+alertcondition(ssl_sweep,
+    title   = "SSL Sweep — XAUUSD",
+    message = "Sell-Side Liquidity Swept on XAUUSD @ {{low}} | Watch for bullish MSS + FVG entry")
+
+alertcondition(bsl_sweep,
+    title   = "BSL Sweep — XAUUSD",
+    message = "Buy-Side Liquidity Swept on XAUUSD @ {{high}} | Watch for bearish MSS + FVG entry")
+
+alertcondition(bull_mss,
+    title   = "Bullish MSS — XAUUSD",
+    message = "Bullish Market Structure Shift on XAUUSD @ {{close}}")
+
+alertcondition(bear_mss,
+    title   = "Bearish MSS — XAUUSD",
+    message = "Bearish Market Structure Shift on XAUUSD @ {{close}}")
