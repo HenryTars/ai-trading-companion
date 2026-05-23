@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     TRADING_MODE: str = "manual"
 
     # External API keys — set in .env
+    ANTHROPIC_API_KEY: str = ""
     OPENAI_API_KEY: str = ""
     BINANCE_API_KEY: str = ""
     BINANCE_SECRET_KEY: str = ""

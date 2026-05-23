@@ -76,6 +76,7 @@ with st.sidebar:
         "📓  Trade Journal":        "trade_journal",
         "🤖  Autonomous Trading":   "autonomous_trading",
         "📈  Performance":          "performance",
+        "💬  Chat Agent":           "chat_agent",
         "⚙️  Settings":             "settings_page",
     }
 
@@ -134,5 +135,7 @@ elif page_key == "autonomous_trading":
     from app.pages import autonomous_trading; autonomous_trading.render()
 elif page_key == "performance":
     from app.pages import performance; performance.render()
+elif page_key == "chat_agent":
+    from app.pages import chat_agent; chat_agent.render()
 elif page_key == "settings_page":
     from app.pages import settings_page; settings_page.render()
