@@ -9,6 +9,9 @@ import requests
 import pandas as pd
 
 from app.ui.components import section_header
+from ai_engine.trade_journal_ai.trade_reviewer import review_trade
+from ai_engine.trade_journal_ai.habit_detector import detect_habits
+from ai_engine.trade_journal_ai.performance_narrator import generate_narrative, weekly_summary
 
 API = "http://localhost:8000/api/journal"
 
@@ -174,20 +177,126 @@ def render():
 
     # ── Tab 4: AI Review ──────────────────────────────────────
     with tab_review:
-        section_header("AI Trade Review", "Phase 7")
-        st.info(
-            "AI scoring, habit pattern analysis, mistake detection, and improvement tips "
-            "connect in **Phase 7** (Trade Journal AI Engine)."
-        )
-        if live:
+        section_header("AI Trade Review")
+
+        if not live:
+            st.info("Backend offline — start the API to use AI review.")
+        else:
             try:
-                perf = requests.get(f"{API}/performance", timeout=5).json()
-                if perf["total_trades"] > 0:
+                trades = requests.get(f"{API}/trades", params={"limit": 200}, timeout=5).json()
+                perf   = requests.get(f"{API}/performance", timeout=5).json()
+            except Exception as e:
+                st.error(f"Could not load trades: {e}")
+                trades, perf = [], {}
+
+            sub_single, sub_habits, sub_narr, sub_week = st.tabs(
+                ["🔍 Review a Trade", "🧠 Habit Analysis", "📝 Narrative", "📅 This Week"])
+
+            # ── Single trade review ────────────────────────────
+            with sub_single:
+                if not trades:
+                    st.info("No trades found. Log trades first.")
+                else:
+                    open_trades = [t for t in trades if t.get("status") == "open"]
+                    closed_trades = [t for t in trades if t.get("status") in ("win","loss","breakeven")]
+                    review_pool = closed_trades if closed_trades else trades
+                    options = {f"#{t['id']} — {t['symbol']} {t['direction'].upper()} ({t['status'].upper()})": t
+                               for t in review_pool}
+                    chosen_label = st.selectbox("Select a trade to review", list(options.keys()))
+                    chosen = options[chosen_label]
+
+                    result = review_trade(chosen)
+                    grade_colors = {"A":"#238636","B":"#58a6ff","C":"#d29922","D":"#d2a679","F":"#da3633"}
+                    gc = grade_colors.get(result["grade"], "#8b949e")
+
+                    st.markdown(
+                        f'<div style="text-align:center;background:#161b22;border:2px solid {gc};'
+                        f'border-radius:12px;padding:20px;margin:10px 0;">'
+                        f'<div style="color:{gc};font-size:52px;font-weight:800;">{result["grade"]}</div>'
+                        f'<div style="color:#e6edf3;font-size:22px;">{result["score"]} / 100</div>'
+                        f'<div style="color:#8b949e;font-size:13px;margin-top:4px;">'
+                        f'R:R {result["rr_ratio"]} · {chosen.get("session","—")} · {chosen.get("strategy","—")}'
+                        f'</div></div>', unsafe_allow_html=True)
+
+                    st.markdown(f"**AI Tip:** {result['improvement']}")
                     st.divider()
-                    r1, r2, r3, r4 = st.columns(4)
-                    r1.metric("Total Trades", perf["total_trades"])
-                    r2.metric("Win Rate",     f"{perf['win_rate']:.1f}%")
-                    r3.metric("Avg R:R",      f"{perf['avg_rr']:.2f}")
-                    r4.metric("Total P&L",    f"{perf['total_pnl_pct']:+.2f}%")
-            except Exception:
-                pass
+                    col_s, col_w = st.columns(2)
+                    with col_s:
+                        st.markdown("**Strengths**")
+                        for s in result["strengths"]: st.markdown(f"✅ {s}")
+                    with col_w:
+                        st.markdown("**Weaknesses**")
+                        for w in result["weaknesses"]: st.markdown(f"⚠️ {w}")
+
+            # ── Habit analysis ────────────────────────────────
+            with sub_habits:
+                habits = detect_habits(trades)
+                if not habits.get("has_data"):
+                    st.info(habits.get("message", "No closed trades yet."))
+                else:
+                    h1, h2, h3, h4 = st.columns(4)
+                    h1.metric("Closed Trades", habits["total_closed"])
+                    h2.metric("Win Rate",      f"{habits['win_rate']}%")
+                    h3.metric("Avg R:R",       habits["avg_rr"])
+                    h4.metric("Avg Risk",      f"{habits['avg_risk']}%")
+
+                    st.divider()
+                    col_g, col_r = st.columns(2)
+                    with col_g:
+                        section_header("Good Habits")
+                        if habits["good_habits"]:
+                            for h in habits["good_habits"]:
+                                st.markdown(
+                                    f'<div style="background:#0d2818;border-left:3px solid #238636;'
+                                    f'padding:6px 10px;border-radius:4px;margin:4px 0;font-size:13px;">'
+                                    f'✅ {h}</div>', unsafe_allow_html=True)
+                        else:
+                            st.caption("Log more closed trades to detect patterns.")
+                    with col_r:
+                        section_header("Risk Habits")
+                        if habits["risk_habits"]:
+                            for h in habits["risk_habits"]:
+                                st.markdown(
+                                    f'<div style="background:#2d1117;border-left:3px solid #da3633;'
+                                    f'padding:6px 10px;border-radius:4px;margin:4px 0;font-size:13px;">'
+                                    f'⚠️ {h}</div>', unsafe_allow_html=True)
+                        else:
+                            st.caption("No major risk patterns detected.")
+
+                    if habits["patterns"]:
+                        st.divider()
+                        section_header("Other Patterns")
+                        for p in habits["patterns"]: st.markdown(f"- {p}")
+
+                    st.divider()
+                    col_ses, col_str = st.columns(2)
+                    with col_ses:
+                        section_header("Win Rate by Session")
+                        for ses, wr in sorted(habits["session_wr"].items(), key=lambda x: -x[1]):
+                            bar_c = "#238636" if wr >= 60 else ("#d29922" if wr >= 45 else "#da3633")
+                            st.markdown(
+                                f'<div style="display:flex;justify-content:space-between;'
+                                f'background:#161b22;padding:5px 10px;border-radius:5px;margin:3px 0;">'
+                                f'<span style="color:#e6edf3;">{ses}</span>'
+                                f'<span style="color:{bar_c};font-weight:700;">{wr}%</span></div>',
+                                unsafe_allow_html=True)
+                    with col_str:
+                        section_header("Win Rate by Strategy")
+                        for strat, wr in sorted(habits["strategy_wr"].items(), key=lambda x: -x[1]):
+                            bar_c = "#238636" if wr >= 60 else ("#d29922" if wr >= 45 else "#da3633")
+                            st.markdown(
+                                f'<div style="display:flex;justify-content:space-between;'
+                                f'background:#161b22;padding:5px 10px;border-radius:5px;margin:3px 0;">'
+                                f'<span style="color:#e6edf3;">{strat}</span>'
+                                f'<span style="color:{bar_c};font-weight:700;">{wr}%</span></div>',
+                                unsafe_allow_html=True)
+
+            # ── Narrative ─────────────────────────────────────
+            with sub_narr:
+                habits_data = detect_habits(trades)
+                narrative = generate_narrative(perf, habits_data, trades)
+                st.markdown(narrative)
+
+            # ── Weekly summary ────────────────────────────────
+            with sub_week:
+                st.markdown(weekly_summary(trades))

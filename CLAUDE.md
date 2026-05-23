@@ -160,15 +160,21 @@ API with lifespan, WebSocket price feed, trade journal routes, analysis routes, 
 - OpenCV screenshot analyzer: Hough line detection, horizontal S/R morphology, HSV candle color analysis, annotated image output
 - Connected upload tab in Chart Analysis page
 
+### Phase 6 — Trade Journal AI
+- `ai_engine/trade_journal_ai/trade_reviewer.py` — scores any trade A–F, R:R, strengths/weaknesses, improvement tip
+- `ai_engine/trade_journal_ai/habit_detector.py` — detects patterns across all closed trades (session/strategy win rates, R:R habits, risk habits, losing streaks, direction bias)
+- `ai_engine/trade_journal_ai/performance_narrator.py` — markdown narrative + 7-day weekly summary
+- Trade Journal "AI Review" tab: 4 sub-tabs (single trade review, habit analysis, narrative, weekly)
+- Performance page: fully wired with equity curve, breakdown table, pattern performance, AI self-review
+
 ---
 
 ## Phases remaining
 
-### Phase 6 — Trade Journal AI
-- AI reviews each closed trade (entry quality, R:R, timing)
-- Habit detection: identifies recurring mistakes
-- Improvement tips and suggestions
-- Weekly/monthly performance narratives
+### Phase 7 — Autonomous Trading Engine
+- Broker connectors (OANDA, MT5, paper trading mode)
+- Execution engine: entry, SL, TP placement
+- Risk manager: max drawdown, position sizing, daily limits
 
 ### Phase 7 — Autonomous Trading Engine
 - Broker connectors (OANDA, MT5, paper trading mode)
