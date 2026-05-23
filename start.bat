@@ -35,14 +35,14 @@ start "AI Trading — Backend" cmd /k "cd /d %~dp0 && %PYTHON% -m uvicorn backen
 
 timeout /t 3 /nobreak >nul
 
-echo  [2/2] Starting Streamlit Frontend on http://localhost:8501 ...
-start "AI Trading — Frontend" cmd /k "cd /d %~dp0 && %PYTHON% -m streamlit run app/main.py --server.port 8501 --server.address localhost"
+echo  [2/2] Starting Streamlit Frontend on http://localhost:8502 ...
+start "AI Trading — Frontend" cmd /k "cd /d %~dp0 && %PYTHON% -m streamlit run app/main.py --server.port 8502 --server.address localhost"
 
 timeout /t 4 /nobreak >nul
 
 echo.
 echo  ===============================================
-echo   Frontend : http://localhost:8501
+echo   Frontend : http://localhost:8502
 echo   Backend  : http://localhost:8000
 echo   API Docs : http://localhost:8000/docs
 echo  ===============================================

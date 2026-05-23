@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     # Server addresses
     HOST: str = "127.0.0.1"
     BACKEND_PORT: int = 8000
-    FRONTEND_PORT: int = 8501
+    FRONTEND_PORT: int = 8502
 
     # Database
     DATABASE_URL: str = f"sqlite:///{BASE_DIR}/database/sqlite/trading.db"

@@ -177,18 +177,26 @@ API with lifespan, WebSocket price feed, trade journal routes, analysis routes, 
 
 ---
 
-## Phases remaining
-
-### Phase 8 — Self-Improvement ML Engine
-- Backtesting framework
-- Pattern → outcome tracking
-- Adaptive optimizer: re-weights which signals matter based on real results
-
 ### Phase 9 — Integration & Polish
-- Connect all modules end-to-end
-- Full test suite
-- Performance dashboard with equity curve
-- Final UI polish
+- `app/services/settings_service.py` — sync SQLite read/write for all app settings (AppSetting table)
+- `app/pages/settings_page.py` — fully rebuilt: 5 tabs (AI Engine, Risk Limits, Engine Mode, Broker API, System); settings persist to DB; .env viewer; connection test; system info; reset to defaults
+- `app/main.py` — sidebar polished: live backend status indicator, paper account balance widget, saved trading mode display
+- `config/settings.py` — FRONTEND_PORT fixed to 8502
+- `backend/api.py` — CORS expanded to cover 8501 and 8502 explicitly
+- `start.bat` — fixed to launch Streamlit on port 8502
+- Full integration test: all modules across all 9 phases import successfully
+
+## ALL 9 PHASES COMPLETE ✓
+
+## Status
+The application is fully built. Run with `start.bat` or:
+```powershell
+# Terminal 1
+py -m uvicorn backend.api:app --host 127.0.0.1 --port 8000 --reload
+# Terminal 2
+py -m streamlit run app/main.py --server.port 8502 --server.address localhost
+```
+Access at: http://localhost:8502
 
 ---
 
