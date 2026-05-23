@@ -12,6 +12,7 @@ from autonomous_trading.broker_connector.paper_broker import PaperBroker
 from autonomous_trading.ai_risk_manager.risk_manager import RiskManager
 from autonomous_trading.strategy_selector.signal_generator import scan_signals, WATCHLIST
 from autonomous_trading.execution_engine.executor import TradingExecutor
+from autonomous_trading.simulation_engine.backtester import run_backtest
 
 
 def _color(direction: str) -> str:
@@ -55,8 +56,8 @@ def render():
     broker   = executor.broker
     summary  = broker.get_summary()
 
-    tab_dash, tab_scan, tab_pos, tab_hist = st.tabs(
-        ["📊 Dashboard", "🔍 Signal Scanner", "📂 Open Positions", "📋 Trade History"])
+    tab_dash, tab_scan, tab_pos, tab_hist, tab_bt = st.tabs(
+        ["📊 Dashboard", "🔍 Signal Scanner", "📂 Open Positions", "📋 Trade History", "🧪 Backtest"])
 
     # ── Tab 1: Dashboard ──────────────────────────────────────
     with tab_dash:
@@ -264,3 +265,82 @@ def render():
             st.markdown(
                 f'<div style="text-align:right;color:{p_color};font-weight:700;font-size:15px;">'
                 f'Net P&L: ${total_pnl:+.2f}</div>', unsafe_allow_html=True)
+
+    # ── Tab 5: Backtest ───────────────────────────────────────
+    with tab_bt:
+        import plotly.graph_objects as go
+        section_header("Strategy Backtester", "Walk-forward simulation on historical data")
+
+        bt1, bt2, bt3, bt4 = st.columns(4)
+        with bt1: bt_sym  = st.selectbox("Symbol",    list(SYMBOL_MAP.keys()), key="bt_sym")
+        with bt2: bt_tf   = st.selectbox("Timeframe", ["H4","D1","H1","W1"],   key="bt_tf")
+        with bt3: bt_conf = st.slider("Min Confidence (%)", 50, 85, 60, 5,     key="bt_conf")
+        with bt4: bt_risk = st.slider("Risk / Trade (%)",   0.5, 3.0, 1.0, 0.5, key="bt_risk")
+
+        adv1, adv2 = st.columns(2)
+        with adv1: bt_lb = st.slider("Lookback bars",  20, 100, 50, 10, key="bt_lb")
+        with adv2: bt_fw = st.slider("Forward bars",   5,  40,  20,  5, key="bt_fw")
+
+        if st.button("▶ Run Backtest", type="primary", use_container_width=True):
+            with st.spinner(f"Running backtest on {bt_sym} · {bt_tf}…"):
+                result = run_backtest(
+                    symbol=bt_sym, timeframe=bt_tf,
+                    lookback=bt_lb, forward=bt_fw,
+                    conf_threshold=bt_conf / 100,
+                    risk_pct=bt_risk,
+                )
+            st.session_state["bt_result"] = result
+
+        result = st.session_state.get("bt_result")
+        if result:
+            if "error" in result:
+                st.warning(result["error"])
+            else:
+                ret_c = "#238636" if result["total_return"] >= 0 else "#da3633"
+                r1, r2, r3, r4, r5, r6 = st.columns(6)
+                r1.metric("Trades",      result["total_trades"])
+                r2.metric("Win Rate",    f"{result['win_rate']}%")
+                r3.metric("Avg R:R",     result["avg_rr"])
+                r4.metric("Return",      f"{result['total_return']:+.2f}%")
+                r5.metric("Max DD",      f"-{result['max_drawdown']}%")
+                r6.metric("Sharpe",      result["sharpe"])
+
+                st.divider()
+                eq = result["equity_curve"]
+                eq_color = "#238636" if eq[-1] >= eq[0] else "#da3633"
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(
+                    x=list(range(len(eq))), y=eq, mode="lines",
+                    line=dict(color=eq_color, width=2),
+                    fill="tozeroy",
+                    fillcolor="rgba(35,134,54,0.08)" if eq_color == "#238636" else "rgba(218,54,51,0.08)",
+                    name="Equity"))
+                fig.add_hline(y=10000, line_dash="dot", line_color="#8b949e", line_width=1)
+                fig.update_layout(
+                    paper_bgcolor="#0d1117", plot_bgcolor="#0d1117", font_color="#e6edf3",
+                    xaxis=dict(gridcolor="#21262d", title="Trade #"),
+                    yaxis=dict(gridcolor="#21262d", side="right", title="Equity ($)"),
+                    margin=dict(l=0, r=0, t=10, b=0), height=300)
+                st.plotly_chart(fig, use_container_width=True)
+
+                pf_c = "#238636" if result["profit_factor"] >= 1.5 else ("#d29922" if result["profit_factor"] >= 1 else "#da3633")
+                st.markdown(
+                    f'Profit Factor: <span style="color:{pf_c};font-weight:700;">{result["profit_factor"]}</span> · '
+                    f'Avg Confidence: **{result["avg_conf"]}%** · '
+                    f'Final equity: **${result["final_equity"]:,.2f}**',
+                    unsafe_allow_html=True)
+
+                if result.get("trades"):
+                    with st.expander("Trade log"):
+                        trades_df = [{
+                            "Bar": t["bar"], "Symbol": t["symbol"],
+                            "Dir": t["direction"].upper(),
+                            "Conf": f"{int(t['confidence']*100)}%",
+                            "Entry": t["entry"], "R:R": t["rr"],
+                            "Outcome": t["outcome"].upper(),
+                            "P&L $": f"${t['pnl']:+.2f}",
+                            "Equity": f"${t['equity']:,.2f}",
+                        } for t in result["trades"]]
+                        st.dataframe(pd.DataFrame(trades_df), use_container_width=True, hide_index=True)
+        else:
+            st.info("Configure parameters above and click **Run Backtest**.")

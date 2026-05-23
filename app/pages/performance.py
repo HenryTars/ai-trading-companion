@@ -11,6 +11,8 @@ import requests
 from app.ui.components import section_header
 from ai_engine.trade_journal_ai.habit_detector import detect_habits
 from ai_engine.trade_journal_ai.performance_narrator import generate_narrative
+from autonomous_trading.self_improvement_engine.pattern_tracker import build_stats
+from autonomous_trading.adaptive_optimizer.optimizer import generate_recommendations
 
 API = "http://localhost:8000/api/journal"
 
@@ -63,8 +65,8 @@ def render():
 
     st.divider()
 
-    tab_equity, tab_pattern, tab_breakdown, tab_ai = st.tabs(
-        ["📊 Equity Curve", "🔬 Pattern Performance", "📂 Breakdown", "🧠 AI Self-Review"])
+    tab_equity, tab_pattern, tab_breakdown, tab_ai, tab_improve = st.tabs(
+        ["📊 Equity Curve", "🔬 Pattern Performance", "📂 Breakdown", "🧠 AI Self-Review", "🔧 Self-Improvement"])
 
     # ── Tab 1: Equity Curve ───────────────────────────────────
     with tab_equity:
@@ -180,3 +182,62 @@ def render():
                         f'<div style="background:#2d1117;border-left:3px solid #da3633;'
                         f'padding:6px 10px;border-radius:4px;margin:4px 0;font-size:13px;">'
                         f'⚠️ {h}</div>', unsafe_allow_html=True)
+
+    # ── Tab 5: Self-Improvement ───────────────────────────────
+    with tab_improve:
+        section_header("AI Self-Improvement Engine", "Learns from paper trading outcomes")
+
+        paper_stats = build_stats()
+        recs = generate_recommendations(paper_stats)
+
+        if not recs.get("has_data"):
+            st.info(recs.get("message", "Run paper trades via the Autonomous Trading engine to unlock this."))
+        else:
+            verdict_colors = {"strong": "#238636", "developing": "#d29922", "needs-work": "#da3633"}
+            vc = verdict_colors.get(recs["verdict"], "#8b949e")
+            st.markdown(
+                f'<div style="background:#161b22;border:1px solid {vc};border-radius:8px;padding:12px 16px;">'
+                f'<span style="color:{vc};font-weight:700;">{recs["verdict"].upper()}</span> — '
+                f'{recs["summary"]}</div>', unsafe_allow_html=True)
+
+            st.divider()
+            section_header("Optimization Recommendations")
+            for rec in recs["recommendations"]:
+                st.markdown(rec)
+
+            if recs["boosts"] or recs["penalties"]:
+                st.divider()
+                col_b, col_p = st.columns(2)
+                with col_b:
+                    section_header("Confidence Boosts")
+                    for b in recs["boosts"]:
+                        bc = "#238636"
+                        st.markdown(
+                            f'<div style="background:#0d2818;border-left:3px solid {bc};'
+                            f'padding:6px 10px;border-radius:4px;margin:4px 0;font-size:13px;">'
+                            f'✅ <b>{b["condition"]}</b> ({b["win_rate"]}% WR)<br>'
+                            f'<span style="color:#8b949e;">{b["action"]}</span></div>',
+                            unsafe_allow_html=True)
+                with col_p:
+                    section_header("Confidence Penalties")
+                    for p in recs["penalties"]:
+                        pc = "#da3633"
+                        st.markdown(
+                            f'<div style="background:#2d1117;border-left:3px solid {pc};'
+                            f'padding:6px 10px;border-radius:4px;margin:4px 0;font-size:13px;">'
+                            f'⚠️ <b>{p["condition"]}</b> ({p["win_rate"]}% WR)<br>'
+                            f'<span style="color:#8b949e;">{p["action"]}</span></div>',
+                            unsafe_allow_html=True)
+
+            if paper_stats.get("confidence_stats"):
+                st.divider()
+                section_header("Win Rate by Confidence Band")
+                for band, data in paper_stats["confidence_stats"].items():
+                    bc = "#238636" if data["win_rate"] >= 60 else ("#d29922" if data["win_rate"] >= 45 else "#da3633")
+                    st.markdown(
+                        f'<div style="background:#161b22;padding:6px 12px;border-radius:5px;'
+                        f'display:flex;justify-content:space-between;margin:3px 0;">'
+                        f'<span style="color:#e6edf3;">{band}</span>'
+                        f'<span style="color:#8b949e;">{data["trades"]} trades</span>'
+                        f'<span style="color:{bc};font-weight:700;">{data["win_rate"]}%</span></div>',
+                        unsafe_allow_html=True)
