@@ -167,19 +167,17 @@ API with lifespan, WebSocket price feed, trade journal routes, analysis routes, 
 - Trade Journal "AI Review" tab: 4 sub-tabs (single trade review, habit analysis, narrative, weekly)
 - Performance page: fully wired with equity curve, breakdown table, pattern performance, AI self-review
 
+### Phase 7 — Autonomous Trading Engine
+- `autonomous_trading/broker_connector/paper_broker.py` — virtual $10k account, JSON state persistence, open/close positions, equity tracking, daily reset
+- `autonomous_trading/ai_risk_manager/risk_manager.py` — 7 risk rules: daily drawdown, consecutive losses, open cap, min R:R, min confidence, risk %, balance check
+- `autonomous_trading/strategy_selector/signal_generator.py` — scans watchlist, runs AI analysis, returns entry/SL/TP/RR signals sorted by confidence
+- `autonomous_trading/execution_engine/executor.py` — orchestrates scan→risk check→paper execute; auto-closes SL/TP hits
+- `app/pages/autonomous_trading.py` — 4 tabs: Dashboard, Signal Scanner (Assisted/Auto), Open Positions, Trade History
+- 3 modes: Manual, Assisted (approve each), Paper Auto (auto-execute)
+
 ---
 
 ## Phases remaining
-
-### Phase 7 — Autonomous Trading Engine
-- Broker connectors (OANDA, MT5, paper trading mode)
-- Execution engine: entry, SL, TP placement
-- Risk manager: max drawdown, position sizing, daily limits
-
-### Phase 7 — Autonomous Trading Engine
-- Broker connectors (OANDA, MT5, paper trading mode)
-- Execution engine: entry, SL, TP placement
-- Risk manager: max drawdown, position sizing, daily limits
 
 ### Phase 8 — Self-Improvement ML Engine
 - Backtesting framework
