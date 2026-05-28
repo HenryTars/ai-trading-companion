@@ -1,33 +1,37 @@
-from fastapi import APIRouter
-from app.ui.market_data import get_market_overview, get_price_data
+"""Market data routes — OHLCV, prices, overview."""
+
+from fastapi import APIRouter, HTTPException
+from backend.services.ohlcv_service import get_ohlcv, get_latest_price, get_market_overview
 
 router = APIRouter()
 
 
-@router.get("/overview")
-async def market_overview():
-    data = get_market_overview()
-    return {"symbols": data, "count": len(data)}
+@router.get("/ohlcv/{symbol}")
+async def ohlcv(symbol: str, timeframe: str = "H1"):
+    """Return OHLCV candles for LightweightCharts."""
+    candles = get_ohlcv(symbol.upper(), timeframe.upper())
+    if not candles:
+        raise HTTPException(status_code=404, detail=f"No market data for {symbol}")
+    return {"symbol": symbol.upper(), "timeframe": timeframe.upper(), "candles": candles}
 
 
 @router.get("/price/{symbol}")
-async def get_price(symbol: str, timeframe: str = "H1"):
-    df = get_price_data(symbol.upper(), timeframe)
-    if df.empty:
-        return {"symbol": symbol.upper(), "timeframe": timeframe, "error": "No data"}
-    return {
-        "symbol":    symbol.upper(),
-        "timeframe": timeframe,
-        "last":      float(df["Close"].iloc[-1]),
-        "high":      float(df["High"].max()),
-        "low":       float(df["Low"].min()),
-        "open":      float(df["Open"].iloc[0]),
-        "candles":   len(df),
-    }
+async def price(symbol: str):
+    """Latest price snapshot."""
+    data = get_latest_price(symbol.upper())
+    if not data:
+        raise HTTPException(status_code=404, detail=f"No price data for {symbol}")
+    return data
+
+
+@router.get("/overview")
+async def overview():
+    """Multi-symbol overview for watchlist."""
+    return get_market_overview()
 
 
 @router.get("/sentiment")
-async def market_sentiment():
+async def sentiment():
     data = get_market_overview()
     bullish = sum(1 for d in data if d["change_pct"] >  0.1)
     bearish = sum(1 for d in data if d["change_pct"] < -0.1)
@@ -38,5 +42,4 @@ async def market_sentiment():
         "bearish_count": bearish,
         "neutral_count": neutral,
         "overall":       overall,
-        "symbols":       len(data),
     }

@@ -1,0 +1,22 @@
+"use client";
+
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Layers } from "lucide-react";
+
+export default function PatternsPage() {
+  return (
+    <div className="space-y-4 animate-slide-up">
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Layers className="w-4 h-4 text-terminal-accent" />
+            Pattern Recognition Lab
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-terminal-muted text-sm">Pattern recognition UI coming in Phase 3.</p>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
