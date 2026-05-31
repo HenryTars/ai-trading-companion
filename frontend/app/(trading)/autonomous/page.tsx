@@ -13,6 +13,24 @@ import {
   Activity, Lock, Unlock, ChevronRight,
 } from "lucide-react";
 
+// ─── All tradeable symbols ────────────────────────────────────────────────────
+
+const ALL_SYMBOLS = [
+  { id: "XAUUSD",  label: "Gold",    group: "metals"  },
+  { id: "EURUSD",  label: "EUR/USD", group: "forex"   },
+  { id: "GBPUSD",  label: "GBP/USD", group: "forex"   },
+  { id: "BTCUSDT", label: "Bitcoin", group: "crypto"  },
+  { id: "ETHUSDT", label: "Ethereum",group: "crypto"  },
+  { id: "US100",   label: "NAS100",  group: "indices" },
+];
+
+// Crypto trades 24/7; forex/metals are closed Sat–Sun
+function isMarketOpen(group: string): boolean {
+  const day = new Date().getDay(); // 0=Sun, 6=Sat
+  if (group === "crypto") return true;
+  return day !== 0 && day !== 6;
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type EngineMode = "manual" | "assisted" | "auto";
@@ -254,10 +272,25 @@ function SignalQueue({
   mode: EngineMode;
   isLocked: boolean;
   isScanning: boolean;
-  onScan: () => void;
+  onScan: (symbols: string[]) => void;
   onApprove: (id: string) => void;
   onReject: (id: string) => void;
 }) {
+  const [selected, setSelected] = useState<Set<string>>(
+    () => new Set(ALL_SYMBOLS.filter(s => isMarketOpen(s.group)).map(s => s.id))
+  );
+
+  function toggleSymbol(id: string) {
+    setSelected(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
+  const openSymbols   = ALL_SYMBOLS.filter(s => isMarketOpen(s.group));
+  const closedSymbols = ALL_SYMBOLS.filter(s => !isMarketOpen(s.group));
+
   return (
     <Card className="flex flex-col">
       <CardHeader className="pb-2">
@@ -272,17 +305,49 @@ function SignalQueue({
           {mode !== "manual" && (
             <Button
               variant="outline"
-              onClick={onScan}
-              disabled={isScanning || isLocked}
+              onClick={() => onScan(Array.from(selected))}
+              disabled={isScanning || isLocked || selected.size === 0}
               className="gap-1.5 h-7 text-xs"
             >
               {isScanning
                 ? <RefreshCw className="w-3 h-3 animate-spin" />
                 : <Play className="w-3 h-3" />}
-              {isScanning ? "Scanning…" : "Scan Markets"}
+              {isScanning ? "Scanning…" : `Scan (${selected.size})`}
             </Button>
           )}
         </div>
+
+        {/* Symbol selector chips */}
+        {mode !== "manual" && (
+          <div className="space-y-1.5 pt-1">
+            <div className="flex flex-wrap gap-1">
+              {openSymbols.map(({ id, label }) => (
+                <button
+                  key={id}
+                  onClick={() => toggleSymbol(id)}
+                  className={cn(
+                    "px-2 py-0.5 rounded-full text-[10px] font-medium border transition-all",
+                    selected.has(id)
+                      ? "bg-terminal-accent/20 border-terminal-accent text-terminal-accent"
+                      : "bg-transparent border-terminal-border text-terminal-muted hover:border-terminal-accent/50"
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {closedSymbols.length > 0 && (
+              <div className="flex flex-wrap gap-1 items-center">
+                <span className="text-[10px] text-terminal-muted">Closed:</span>
+                {closedSymbols.map(({ id, label }) => (
+                  <span key={id} className="px-2 py-0.5 rounded-full text-[10px] border border-terminal-border/40 text-terminal-muted/40 line-through">
+                    {label}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </CardHeader>
       <CardContent className="flex-1 space-y-2 overflow-auto max-h-80">
         {mode === "manual" ? (
@@ -556,10 +621,10 @@ export default function AutonomousPage() {
     onSuccess:  () => { qc.invalidateQueries({ queryKey: ["paper-sum"] }); qc.invalidateQueries({ queryKey: ["paper-pos"] }); qc.invalidateQueries({ queryKey: ["paper-hist"] }); qc.invalidateQueries({ queryKey: ["auto-status"] }); },
   });
 
-  async function handleScan() {
+  async function handleScan(symbols: string[]) {
     setIsScanning(true);
     try {
-      await autonomousApi.scan();
+      await autonomousApi.scan(symbols);
       qc.invalidateQueries({ queryKey: ["auto-pending"] });
       qc.invalidateQueries({ queryKey: ["auto-status"] });
     } finally {
@@ -601,7 +666,7 @@ export default function AutonomousPage() {
             mode={mode}
             isLocked={isLocked}
             isScanning={isScanning}
-            onScan={handleScan}
+            onScan={(syms) => handleScan(syms)}
             onApprove={(id) => approveMutation.mutate(id)}
             onReject={(id) => rejectMutation.mutate(id)}
           />

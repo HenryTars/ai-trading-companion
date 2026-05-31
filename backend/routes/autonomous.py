@@ -21,7 +21,7 @@ _risk  = RiskManager()
 
 _config: dict = {
     "mode":              "assisted",   # manual | assisted | auto
-    "symbols":           ["XAUUSD", "EURUSD", "GBPUSD"],
+    "symbols":           ["XAUUSD", "EURUSD", "GBPUSD", "BTCUSDT", "ETHUSDT", "US100"],
     "max_risk_pct":      1.0,
     "volume":            0.01,         # lot size for real MT5 orders
     "max_open_trades":   3,
@@ -58,9 +58,9 @@ def _global_lock() -> tuple[bool, str]:
     return False, ""
 
 
-def _scan_sync() -> list[dict]:
+def _scan_sync(symbols: list[str] | None = None) -> list[dict]:
     from autonomous_trading.strategy_selector.signal_generator import scan_signals
-    return scan_signals(_config["symbols"], timeframe="H1")
+    return scan_signals(symbols or _config["symbols"], timeframe="H1")
 
 
 def _execute(signal_id: str) -> dict | None:
@@ -182,13 +182,15 @@ async def risk_reset():
 # ── Signal scanning ───────────────────────────────────────────────────────────
 
 @router.post("/scan")
-async def trigger_scan():
+async def trigger_scan(body: dict = {}):
     global _last_scan
     if _config["mode"] == "manual":
         return {"ok": False, "message": "Switch to Assisted or Auto mode to enable scanning"}
 
+    # body.symbols overrides the configured list for this scan only
+    override = body.get("symbols") or None
     loop = asyncio.get_event_loop()
-    signals = await loop.run_in_executor(None, _scan_sync)
+    signals = await loop.run_in_executor(None, lambda: _scan_sync(override))
     _last_scan = time.time()
 
     new_count = 0

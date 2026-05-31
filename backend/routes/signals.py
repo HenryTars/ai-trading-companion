@@ -16,7 +16,7 @@ router = APIRouter()
 _cache: dict[str, dict] = {}
 _last_generated: float = 0.0
 _CACHE_TTL = 300          # 5 minutes
-_SIGNAL_SYMBOLS = ["XAUUSD", "EURUSD", "GBPUSD"]
+_SIGNAL_SYMBOLS = ["XAUUSD", "EURUSD", "GBPUSD", "BTCUSDT", "ETHUSDT", "US100"]
 
 
 def _bias_norm(raw: str) -> str:
