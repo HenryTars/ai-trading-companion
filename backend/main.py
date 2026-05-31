@@ -20,6 +20,7 @@ from database.sqlite.init_db import init_db
 from backend.routes import analysis, journal, autonomous, market
 from backend.routes.mt5 import router as mt5_router
 from backend.routes.status import router as status_router
+from backend.routes.signals import router as signals_router
 from backend.websocket.price_stream import manager, price_feed_loop
 from backend.websocket.mt5_stream import mt5_stream_handler
 from backend.mt5_bridge.connector import connector
@@ -77,6 +78,7 @@ app.add_middleware(
 
 app.include_router(status_router,     prefix="/api/status",     tags=["System"])
 app.include_router(mt5_router,        prefix="/api/mt5",        tags=["MT5"])
+app.include_router(signals_router,    prefix="/api/signals",    tags=["Signals"])
 app.include_router(analysis.router,   prefix="/api/analysis",   tags=["Analysis"])
 app.include_router(journal.router,    prefix="/api/journal",    tags=["Journal"])
 app.include_router(autonomous.router, prefix="/api/autonomous", tags=["Autonomous"])

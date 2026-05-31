@@ -7,7 +7,7 @@ import type { AccountInfo, MT5Position } from "@/types";
 const WS_URL = `${(process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8000")}/ws/mt5`;
 
 export function useMT5Socket() {
-  const { setAccount, setPositions } = useMT5Store();
+  const { setAccount, setPositions, setStatus } = useMT5Store();
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
@@ -28,7 +28,11 @@ export function useMT5Socket() {
             account: AccountInfo | null;
             positions: MT5Position[];
           };
-          if (payload.account) setAccount(payload.account);
+          if (payload.account) {
+            setAccount(payload.account);
+            // Sync connected status so AccountPanel shows data
+            setStatus({ connected: true });
+          }
           if (payload.positions) setPositions(payload.positions);
         } catch { /* ignore */ }
       };
@@ -49,5 +53,5 @@ export function useMT5Socket() {
       if (reconnectRef.current) clearTimeout(reconnectRef.current);
       wsRef.current?.close();
     };
-  }, [setAccount, setPositions]);
+  }, [setAccount, setPositions, setStatus]);
 }

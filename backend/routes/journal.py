@@ -14,13 +14,13 @@ router = APIRouter()
 UPLOAD_DIR = Path(__file__).resolve().parent.parent.parent / "uploads"
 
 
-@router.post("/trade", response_model=TradeResponse)
-async def log_trade(trade: TradeCreate, db: Session = Depends(get_db)):
+@router.post("/trades", response_model=TradeResponse)
+async def create_trade(trade: TradeCreate, db: Session = Depends(get_db)):
     return trade_service.create_trade(db, trade)
 
 
 @router.get("/trades", response_model=list[TradeResponse])
-async def get_trades(
+async def list_trades(
     skip: int = 0,
     limit: int = 100,
     symbol: str | None = None,
@@ -31,7 +31,7 @@ async def get_trades(
                                     symbol=symbol, status=status)
 
 
-@router.get("/trade/{trade_id}", response_model=TradeResponse)
+@router.get("/trades/{trade_id}", response_model=TradeResponse)
 async def get_trade(trade_id: int, db: Session = Depends(get_db)):
     trade = trade_service.get_trade(db, trade_id)
     if not trade:
@@ -39,7 +39,7 @@ async def get_trade(trade_id: int, db: Session = Depends(get_db)):
     return trade
 
 
-@router.patch("/trade/{trade_id}", response_model=TradeResponse)
+@router.patch("/trades/{trade_id}", response_model=TradeResponse)
 async def update_trade(
     trade_id: int, update: TradeUpdate, db: Session = Depends(get_db)
 ):
@@ -49,7 +49,7 @@ async def update_trade(
     return trade
 
 
-@router.delete("/trade/{trade_id}")
+@router.delete("/trades/{trade_id}")
 async def delete_trade(trade_id: int, db: Session = Depends(get_db)):
     if not trade_service.delete_trade(db, trade_id):
         raise HTTPException(status_code=404, detail="Trade not found")
@@ -61,7 +61,7 @@ async def get_performance(db: Session = Depends(get_db)):
     return trade_service.get_performance_summary(db)
 
 
-@router.post("/trade/{trade_id}/screenshot")
+@router.post("/trades/{trade_id}/screenshot")
 async def upload_screenshot(
     trade_id: int,
     file: UploadFile = File(...),

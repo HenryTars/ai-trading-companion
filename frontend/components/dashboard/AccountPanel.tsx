@@ -43,7 +43,7 @@ function MetricCard({
 export function AccountPanel() {
   const { account, positions, status } = useMT5Store();
 
-  if (!status.connected || !account) {
+  if (!account) {
     return (
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {["Balance", "Equity", "Floating P&L", "Margin Used"].map((label) => (
