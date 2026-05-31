@@ -61,6 +61,11 @@ async def get_performance(db: Session = Depends(get_db)):
     return trade_service.get_performance_summary(db)
 
 
+@router.get("/analytics")
+async def get_analytics(db: Session = Depends(get_db)):
+    return trade_service.get_analytics(db)
+
+
 @router.post("/trades/{trade_id}/screenshot")
 async def upload_screenshot(
     trade_id: int,

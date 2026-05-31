@@ -74,6 +74,8 @@ export const journalApi = {
   update: (id: number, data: Partial<Trade>) =>
     api.patch<Trade>(`/api/journal/trades/${id}`, data),
   delete: (id: number) => api.delete(`/api/journal/trades/${id}`),
+  analytics: () => api.get("/api/journal/analytics"),
+  performance: () => api.get("/api/journal/performance"),
 };
 
 // ─── Signals ──────────────────────────────────────────────────────────────────
