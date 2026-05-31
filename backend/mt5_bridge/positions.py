@@ -145,6 +145,21 @@ def open_position(
     if tick is None:
         return {"success": False, "error": f"Symbol {broker_sym} not found on broker (mapped from {symbol})"}
 
+    # Clamp volume to broker's min/max and round to allowed step
+    try:
+        import MetaTrader5 as _mt5_pkg
+        sym_info = _mt5_pkg.symbol_info(broker_sym)
+        if sym_info:
+            vol_min  = sym_info.volume_min
+            vol_max  = sym_info.volume_max
+            vol_step = sym_info.volume_step
+            volume = max(vol_min, min(vol_max, volume))
+            # Round to step precision
+            steps  = round(volume / vol_step)
+            volume = round(steps * vol_step, 10)
+    except Exception:
+        pass
+
     order_type = _ORDER_TYPE_BUY if direction.upper() == "BUY" else _ORDER_TYPE_SELL
     price = tick.ask if direction.upper() == "BUY" else tick.bid
 
