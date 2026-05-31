@@ -95,3 +95,20 @@ export const riskApi = {
   updateConfig: (config: Partial<AutoTradingConfig>) =>
     api.patch<AutoTradingConfig>("/api/autonomous/config", config),
 };
+
+// ─── Autonomous Engine ────────────────────────────────────────────────────────
+
+export const autonomousApi = {
+  status:           () => api.get("/api/autonomous/status"),
+  setMode:          (mode: string) => api.post("/api/autonomous/mode", { mode }),
+  scan:             () => api.post("/api/autonomous/scan"),
+  pending:          () => api.get("/api/autonomous/pending"),
+  approve:          (id: string) => api.post(`/api/autonomous/pending/${id}/approve`),
+  reject:           (id: string) => api.post(`/api/autonomous/pending/${id}/reject`),
+  paperSummary:     () => api.get("/api/autonomous/paper/summary"),
+  paperPositions:   () => api.get("/api/autonomous/paper/positions"),
+  paperHistory:     (limit = 50) => api.get(`/api/autonomous/paper/history?limit=${limit}`),
+  paperClose:       (id: string, exit_price?: number) =>
+    api.post(`/api/autonomous/paper/positions/${id}/close`, exit_price ? { exit_price } : {}),
+  paperReset:       () => api.post("/api/autonomous/paper/reset"),
+};
