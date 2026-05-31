@@ -23,6 +23,7 @@ _config: dict = {
     "mode":              "assisted",   # manual | assisted | auto
     "symbols":           ["XAUUSD", "EURUSD", "GBPUSD"],
     "max_risk_pct":      1.0,
+    "volume":            0.01,         # lot size for real MT5 orders
     "max_open_trades":   3,
     "max_daily_trades":  5,
     "min_confidence":    0.65,
@@ -71,6 +72,30 @@ def _execute(signal_id: str) -> dict | None:
         sig["status"] = "blocked"
         sig["block_reason"] = reason
         return None
+
+    direction_mt5 = "BUY" if sig["direction"] == "long" else "SELL"
+
+    # Try real MT5 first when connected
+    from backend.mt5_bridge.connector import connector
+    from backend.mt5_bridge.positions import open_position as mt5_open
+
+    if connector.is_connected:
+        result = mt5_open(
+            symbol    = sig["symbol"],
+            direction = direction_mt5,
+            volume    = _config.get("volume", 0.01),
+            sl        = sig["sl"],
+            tp        = sig["tp"],
+            comment   = f"AI {int(sig.get('confidence',0)*100)}% RR{sig.get('rr',0):.1f}",
+        )
+        if result.get("success"):
+            sig["status"] = "executed"
+            sig["mt5_ticket"] = result["ticket"]
+            logger.info("MT5 order placed: %s %s ticket=%s", direction_mt5, sig["symbol"], result["ticket"])
+            return result
+        logger.warning("MT5 order failed (%s), falling back to paper", result.get("error"))
+
+    # Paper fallback when MT5 is unavailable
     pos = _paper.open_position(
         symbol    = sig["symbol"],
         direction = sig["direction"],

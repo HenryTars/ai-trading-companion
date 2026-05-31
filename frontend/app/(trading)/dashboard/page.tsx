@@ -22,7 +22,17 @@ function AISignalsFeed() {
   });
 
   async function handleApprove(id: string) {
-    await signalApi.approve(id);
+    try {
+      const res = await signalApi.approve(id);
+      const data = res.data as { ok: boolean; ticket?: number; price?: number; error?: string };
+      if (data.ok) {
+        alert(`✅ Order placed! Ticket #${data.ticket} @ ${data.price?.toFixed(5)}`);
+      } else {
+        alert(`❌ Order failed: ${data.error}`);
+      }
+    } catch {
+      alert("❌ Request failed — check MT5 connection");
+    }
     refetch();
   }
   async function handleReject(id: string) {

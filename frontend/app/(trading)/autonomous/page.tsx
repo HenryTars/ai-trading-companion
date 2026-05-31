@@ -528,7 +528,17 @@ export default function AutonomousPage() {
 
   const approveMutation = useMutation({
     mutationFn: (id: string) => autonomousApi.approve(id),
-    onSuccess:  () => { qc.invalidateQueries({ queryKey: ["auto-pending"] }); qc.invalidateQueries({ queryKey: ["paper-pos"] }); qc.invalidateQueries({ queryKey: ["paper-sum"] }); },
+    onSuccess: (res) => {
+      const data = res.data as { ok: boolean; ticket?: number; price?: number; error?: string };
+      if (data.ok && data.ticket) {
+        alert(`✅ MT5 order placed! Ticket #${data.ticket} @ ${data.price?.toFixed(5)}`);
+      } else if (!data.ok) {
+        alert(`❌ Order failed: ${data.error}`);
+      }
+      qc.invalidateQueries({ queryKey: ["auto-pending"] });
+      qc.invalidateQueries({ queryKey: ["paper-pos"] });
+      qc.invalidateQueries({ queryKey: ["paper-sum"] });
+    },
   });
 
   const rejectMutation = useMutation({
@@ -598,11 +608,27 @@ export default function AutonomousPage() {
         </div>
         <div className="space-y-3">
           <RiskPanel risk={risk ?? defaultRisk} config={config ?? {}} />
-          {/* Reset + last scan info */}
+          {/* Lot size + controls */}
           <Card>
             <CardContent className="p-3 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[10px] text-terminal-muted uppercase tracking-wide">Lot Size</span>
+                <input
+                  type="number"
+                  min="0.01" max="10" step="0.01"
+                  defaultValue={config?.volume ?? 0.01}
+                  onBlur={(e) => {
+                    const v = parseFloat(e.target.value);
+                    if (v > 0) riskApi.updateConfig({ volume: v });
+                  }}
+                  className="w-20 text-right font-mono text-xs bg-terminal-secondary border border-terminal-border rounded px-2 py-1 text-terminal-text focus:outline-none focus:border-terminal-accent"
+                />
+              </div>
+              <p className="text-[10px] text-terminal-muted">
+                Lot size applied to all MT5 orders (0.01 = micro lot)
+              </p>
               {status?.last_scan && (
-                <p className="text-[10px] text-terminal-muted flex items-center gap-1">
+                <p className="text-[10px] text-terminal-muted flex items-center gap-1 pt-1">
                   <RefreshCw className="w-2.5 h-2.5" />
                   Last scan: {new Date(status.last_scan).toLocaleTimeString()}
                 </p>

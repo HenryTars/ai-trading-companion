@@ -187,12 +187,14 @@ export interface AutoTradingConfig {
   mode: TradingMode;
   symbols: string[];
   max_risk_pct: number;
+  volume: number;
   max_open_trades: number;
   max_daily_trades: number;
   min_confidence: number;
   min_rr: number;
   use_trailing_stop: boolean;
   cooldown_minutes: number;
+  max_daily_drawdown: number;
 }
 
 export interface PendingSignal {

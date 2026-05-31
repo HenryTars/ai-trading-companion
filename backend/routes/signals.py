@@ -126,12 +126,35 @@ async def list_signals():
 
 @router.post("/{signal_id}/approve")
 async def approve_signal(signal_id: str):
-    if signal_id in _cache:
-        _cache[signal_id]["status"] = "approved"
-    return {"ok": True}
+    sig = _cache.get(signal_id)
+    if not sig:
+        return {"ok": False, "error": "Signal not found or expired"}
+
+    from backend.mt5_bridge.connector import connector
+    from backend.mt5_bridge.positions import open_position
+
+    if not connector.is_connected:
+        return {"ok": False, "error": "MT5 not connected — start MT5 and click Connect"}
+
+    direction = "BUY" if sig["bias"] == "bullish" else "SELL"
+    result = open_position(
+        symbol    = sig["symbol"],
+        direction = direction,
+        volume    = 0.01,
+        sl        = sig["stop_loss"],
+        tp        = sig["take_profit"],
+        comment   = f"AI {sig['grade']} {int(sig['confidence']*100)}%",
+    )
+    if result.get("success"):
+        sig["status"] = "executed"
+        sig["mt5_ticket"] = result["ticket"]
+        return {"ok": True, "ticket": result["ticket"], "price": result["price"]}
+
+    return {"ok": False, "error": result.get("error", "MT5 order failed")}
 
 
 @router.post("/{signal_id}/reject")
 async def reject_signal(signal_id: str):
-    _cache.pop(signal_id, None)
+    if signal_id in _cache:
+        _cache[signal_id]["status"] = "rejected"
     return {"ok": True}
