@@ -137,14 +137,17 @@ async def approve_signal(signal_id: str):
         return {"ok": False, "error": "MT5 not connected — start MT5 and click Connect"}
 
     direction = "BUY" if sig["bias"] == "bullish" else "SELL"
-    result = open_position(
-        symbol    = sig["symbol"],
+    symbol, sl, tp, grade, conf = sig["symbol"], sig["stop_loss"], sig["take_profit"], sig["grade"], sig["confidence"]
+
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(None, lambda: open_position(
+        symbol    = symbol,
         direction = direction,
         volume    = 0.01,
-        sl        = sig["stop_loss"],
-        tp        = sig["take_profit"],
-        comment   = f"AI {sig['grade']} {int(sig['confidence']*100)}%",
-    )
+        sl        = sl,
+        tp        = tp,
+        comment   = f"AI {grade} {int(conf*100)}%",
+    ))
     if result.get("success"):
         sig["status"] = "executed"
         sig["mt5_ticket"] = result["ticket"]

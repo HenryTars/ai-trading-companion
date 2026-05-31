@@ -204,7 +204,7 @@ async def trigger_scan(body: dict = {}):
         _pending[sid] = sig
         new_count += 1
         if _config["mode"] == "auto":
-            _execute(sid)
+            loop.run_in_executor(None, lambda s=sid: _execute(s))
 
     return {"ok": True, "scanned": len(signals), "qualified": new_count,
             "last_scan": datetime.fromtimestamp(_last_scan, tz=timezone.utc).isoformat()}
@@ -217,7 +217,8 @@ async def get_pending():
 
 @router.post("/pending/{signal_id}/approve")
 async def approve(signal_id: str):
-    pos = _execute(signal_id)
+    loop = asyncio.get_event_loop()
+    pos = await loop.run_in_executor(None, lambda: _execute(signal_id))
     if pos is None:
         reason = _pending.get(signal_id, {}).get("block_reason", "Blocked by risk rules or signal expired")
         return {"ok": False, "error": reason}
