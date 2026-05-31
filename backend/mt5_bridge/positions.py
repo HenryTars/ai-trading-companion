@@ -7,6 +7,28 @@ from .connector import connector
 
 logger = logging.getLogger(__name__)
 
+# Maps our canonical symbol names → broker-specific MT5 names.
+# Exness demo accounts use the 'm' (micro) suffix.
+_MT5_SYMBOL_MAP: dict[str, str] = {
+    "XAUUSD":  "XAUUSDm",
+    "XAGUSD":  "XAGUSDm",
+    "BTCUSDT": "BTCUSDm",
+    "ETHUSDT": "ETHUSDm",
+    "EURUSD":  "EURUSDm",
+    "GBPUSD":  "GBPUSDm",
+    "USDJPY":  "USDJPYm",
+    "AUDUSD":  "AUDUSDm",
+    "USDCAD":  "USDCADm",
+    "US100":   "USTEC_x100m",
+    "US500":   "US500m",
+    "US30":    "US30m",
+}
+
+
+def _broker_symbol(symbol: str) -> str:
+    """Return the broker-specific symbol name, falling back to the original."""
+    return _MT5_SYMBOL_MAP.get(symbol.upper(), symbol)
+
 try:
     import MetaTrader5 as _mt5_module
     _ORDER_TYPE_BUY  = _mt5_module.ORDER_TYPE_BUY
@@ -118,16 +140,17 @@ def open_position(
     if not connector.is_connected:
         return {"success": False, "error": "MT5 not connected"}
 
-    tick = connector.symbol_info_tick(symbol)
+    broker_sym = _broker_symbol(symbol)
+    tick = connector.symbol_info_tick(broker_sym)
     if tick is None:
-        return {"success": False, "error": f"Cannot get tick for {symbol}"}
+        return {"success": False, "error": f"Symbol {broker_sym} not found on broker (mapped from {symbol})"}
 
     order_type = _ORDER_TYPE_BUY if direction.upper() == "BUY" else _ORDER_TYPE_SELL
     price = tick.ask if direction.upper() == "BUY" else tick.bid
 
     request = {
         "action":    _TRADE_ACTION_DEAL,
-        "symbol":    symbol,
+        "symbol":    broker_sym,
         "volume":    volume,
         "type":      order_type,
         "price":     price,

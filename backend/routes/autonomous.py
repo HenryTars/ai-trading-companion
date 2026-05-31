@@ -59,8 +59,55 @@ def _global_lock() -> tuple[bool, str]:
 
 
 def _scan_sync(symbols: list[str] | None = None) -> list[dict]:
-    from autonomous_trading.strategy_selector.signal_generator import scan_signals
-    return scan_signals(symbols or _config["symbols"], timeframe="H1")
+    """Scan symbols using the backend AI engine (not the Streamlit-era scan_signals)."""
+    import pandas as pd
+    from backend.services.ohlcv_service import get_ohlcv
+    from ai_engine.chart_analysis.analyzer import analyze_chart
+
+    targets = symbols or _config["symbols"]
+    results: list[dict] = []
+
+    for symbol in targets:
+        try:
+            candles = get_ohlcv(symbol, "H1")
+            if not candles or len(candles) < 50:
+                continue
+            df = pd.DataFrame(candles).rename(columns={
+                "open": "Open", "high": "High",
+                "low":  "Low",  "close": "Close", "volume": "Volume",
+            })
+            df.index = pd.to_datetime(df["time"], unit="s", utc=True)
+            analysis = analyze_chart(df, symbol, "H1")
+            if "error" in analysis:
+                continue
+            bias = analysis.get("bias", "ranging")
+            if bias == "ranging":
+                continue
+            conf  = float(analysis.get("confidence", 0.0))
+            price = float(analysis.get("current_price", candles[-1]["close"]))
+            atr   = float(analysis.get("indicators", {}).get("atr", price * 0.005)) or price * 0.005
+            if bias == "bullish":
+                direction, sl, tp = "long",  round(price - atr*1.5, 5), round(price + atr*3.0, 5)
+            else:
+                direction, sl, tp = "short", round(price + atr*1.5, 5), round(price - atr*3.0, 5)
+            rr = round(abs(tp - price) / max(abs(price - sl), 1e-9), 2)
+            results.append({
+                "symbol":      symbol,
+                "timeframe":   "H1",
+                "direction":   direction,
+                "bias":        bias,
+                "confidence":  round(conf, 2),
+                "entry":       round(price, 5),
+                "sl":          sl,
+                "tp":          tp,
+                "rr":          rr,
+                "trend_strength": analysis.get("trend_strength", ""),
+                "narrative":   analysis.get("narrative", ""),
+            })
+        except Exception as exc:
+            logger.warning("Scan failed for %s: %s", symbol, exc)
+
+    return results
 
 
 def _execute(signal_id: str) -> dict | None:
